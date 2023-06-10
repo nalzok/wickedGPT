@@ -1,0 +1,14 @@
+name: llm-torch
+channels:
+  - defaults
+dependencies:
+  - python=3.10
+  - pytorch
+  - pytorch-cuda=11.8
+  - wandb
+  - tiktoken
+  - transformers
+  - tqdm
+  - datasets
+  - nvitop
+prefix: /home/qys/anaconda3/envs/llm-torch

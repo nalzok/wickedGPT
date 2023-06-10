@@ -9,7 +9,7 @@ from datasets import load_dataset # huggingface datasets
 
 # number of workers in .map() call
 # good number to use is ~order number of cpu cores // 2
-num_proc = 8
+num_proc = 48
 
 # takes 54GB in huggingface .cache dir, about 8M documents (8,013,769)
 dataset = load_dataset("openwebtext")
