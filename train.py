@@ -115,9 +115,10 @@ ctx = nullcontext() if device_type == 'cpu' else torch.amp.autocast(device_type=
 data_dir = os.path.join('data', dataset)
 train_data = np.memmap(os.path.join(data_dir, 'train.bin'), dtype=np.uint16, mode='r')
 val_data = np.memmap(os.path.join(data_dir, 'val.bin'), dtype=np.uint16, mode='r')
+rng = np.random.default_rng(42)
 def get_batch(split):
     data = train_data if split == 'train' else val_data
-    ix = torch.randint(len(data) - block_size, (batch_size,))
+    ix = rng.integers(len(data) - block_size, size=(batch_size,))
     x = torch.stack([torch.from_numpy((data[i:i+block_size]).astype(np.int64)) for i in ix])
     y = torch.stack([torch.from_numpy((data[i+1:i+1+block_size]).astype(np.int64)) for i in ix])
     if device_type == 'cuda':
@@ -289,6 +290,7 @@ while True:
 
     # forward backward update, with optional gradient accumulation to simulate larger batch size
     # and using the GradScaler if data type is float16
+    total_loss = 0
     for micro_step in range(gradient_accumulation_steps):
         if ddp:
             # in DDP training we only need to sync gradients at the last micro step.
@@ -299,17 +301,29 @@ while True:
         with ctx:
             logits, loss = model(X, Y)
             loss = loss / gradient_accumulation_steps # scale the loss to account for gradient accumulation
+            total_loss += loss.item()
         # immediately async prefetch next batch while model is doing the forward pass on the GPU
         X, Y = get_batch('train')
         # backward pass, with gradient scaling if training in fp16
         scaler.scale(loss).backward()   # type: ignore
     # clip the gradient
+    total_norm = 0
     if grad_clip != 0.0:
         scaler.unscale_(optimizer)
-        torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)   # type: ignore
+        total_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)   # type: ignore
     # step the optimizer and scaler if training in fp16
     scaler.step(optimizer)
     scaler.update()
+
+    if wandb_log and master_process:
+        wandb.log({ # type: ignore
+              "step": iter_num,
+              "lr": lr,
+              "scale": scaler.get_scale(),
+              "loss": total_loss,
+              "norm": total_norm,
+          })
+
     # flush the gradients as soon as we can, no need for this memory anymore
     optimizer.zero_grad(set_to_none=True)
 
